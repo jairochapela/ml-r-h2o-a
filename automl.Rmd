@@ -1,0 +1,59 @@
+---
+title: "automl"
+output: html_document
+---
+
+```{r}
+# Carga de librería ye inicio de la conexión al clúster H2O
+library(readr)
+library(h2o)
+
+Sys.setenv(JAVA_HOME = "/opt/homebrew/opt/openjdk@17")
+
+h2o.init()
+```
+
+# Carga de datos y preparación
+```{r}
+# Import a sample binary outcome train/test set into H2O
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_10k.csv")
+test <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+```
+
+
+```{r}
+# Identify predictors and response
+y <- "response"
+x <- setdiff(names(train), y)
+```
+
+```{r}
+# La variable objetivo es categórica
+train[, y] <- as.factor(train[, y])
+test[, y] <- as.factor(test[, y])
+```
+
+```{r}
+summary(train)
+```
+
+# Ejecutar AutoML
+
+```{r}
+# Run AutoML for 20 base models
+aml <- h2o.automl(x = x, y = y,
+training_frame = train,
+max_models = 3,
+seed = 543121)
+```
+
+
+# Evaluación de los modelos
+
+```{r}
+# View the AutoML Leaderboard
+lb <- aml@leaderboard
+print(lb, n = nrow(lb)) # Print all rows instead of default (6 rows)
+```
+
+

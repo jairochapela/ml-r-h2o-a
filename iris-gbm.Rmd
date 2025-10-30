@@ -1,0 +1,96 @@
+---
+title: "iris"
+output: html_document
+---
+
+```{r}
+# Carga de librería e inicio de la conexión al clúster H2O
+library(h2o)
+h2o.init()
+```
+```{r}
+df_iris <- iris
+h2o_iris <- as.h2o(df_iris)
+```
+# Prepración de los datos
+
+ 1. Definir qué variables usaremos como predictoras y qué variable como objetivo
+ 2. Separar el conjunto de datos en datos de entrenamiento y datos de test
+ 
+```{r}
+X <- c("Sepal.Length", "Sepal.Width", "Petal.Length", "Petal.Width")
+y <- "Species"
+```
+
+```{r}
+summary(h2o_iris)
+```
+
+
+```{r}
+# Histograma de longitud del sépalo
+h2o.hist(h2o_iris$Sepal.Length)
+```
+
+```{r}
+pairs(h2o_iris[,X], col = df_iris[,y])
+```
+```{r}
+splits <- h2o.splitFrame(h2o_iris, ratios = 0.8, seed = 1301)
+train <- splits[[1]]
+test <- splits[[2]]
+```
+
+
+# Entrenamiento del modelo
+
+```{r}
+#h2o_dt <- h2o.decision_tree(x = X, y = y, training_frame = train,
+#                            max_depth = 5,
+#                            min_rows = 10,
+#                           seed = 1301)
+
+model <- h2o.gbm(x = X, y = y, training_frame = train, 
+                 ntrees = 20,
+                 max_depth = 10,
+                 seed = 1301)
+```
+
+```{r}
+model
+```
+
+
+# Validación del modelo
+
+```{r}
+pred <- h2o.predict(model, test)
+```
+
+```{r}
+cm <- h2o.confusionMatrix(model, test)
+cm
+```
+
+```{r}
+cmm <- as.matrix(cm[1:3,1:3])
+sum(diag(cmm)) / sum(cmm)
+```
+
+```{r}
+h2o.performance(model, auc_type = "AUTO", newdata = h2o_iris)
+```
+
+
+# Explotación del modelo
+
+```{r}
+new_data <- data.frame(Sepal.Length = c(5.1, 6.5),
+                       Sepal.Width = c(3.5, 3.0),
+                       Petal.Length = c(1.4, 5.2),
+                       Petal.Width = c(0.2, 2.0))
+h2o_new_data <- as.h2o(new_data)
+pred_new <- h2o.predict(model, h2o_new_data)
+pred_new
+```
+

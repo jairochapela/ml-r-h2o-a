@@ -1,0 +1,142 @@
+---
+title: "iris"
+output: html_document
+---
+
+```{r}
+# Carga de librería e inicio de la conexión al clúster H2O
+library(h2o)
+h2o.init()
+```
+```{r}
+df_iris <- iris
+h2o_iris <- as.h2o(df_iris)
+```
+# Prepración de los datos
+
+ 1. Definir qué variables usaremos como predictoras y qué variable como objetivo
+ 2. Separar el conjunto de datos en datos de entrenamiento y datos de test
+ 
+```{r}
+X <- c("Sepal.Length", "Sepal.Width", "Petal.Length", "Petal.Width")
+y <- "Species"
+```
+
+```{r}
+summary(h2o_iris)
+```
+
+
+```{r}
+# Histograma de longitud del sépalo
+h2o.hist(h2o_iris$Sepal.Length)
+```
+
+```{r}
+pairs(h2o_iris[,X], col = df_iris[,y])
+```
+Transformación de variable categórica a "dummies" booleanos
+```{r}
+h2o_iris$is_setosa <- as.factor(h2o.ifelse(h2o_iris$Species == "setosa", 1, 0))
+h2o_iris$is_versicolor <- as.factor(h2o.ifelse(h2o_iris$Species == "versicolor", 1, 0))
+#h2o_iris$is_virginica <- h2o.ifelse(h2o_iris$Species == "virginica", 1, 0)
+```
+
+
+
+
+```{r}
+splits <- h2o.splitFrame(h2o_iris, ratios = 0.8, seed = 1301)
+train <- splits[[1]]
+test <- splits[[2]]
+```
+
+
+# Entrenamiento del modelo
+
+```{r}
+h2o_dt_setosa <- h2o.decision_tree(x = X, y = "is_setosa", training_frame = train,
+                            max_depth = 5,
+                            min_rows = 10,
+                           seed = 1301)
+
+h2o_dt_versicolor <- h2o.decision_tree(x = X, y = "is_versicolor", training_frame = train,
+                            max_depth = 5,
+                            min_rows = 10,
+                           seed = 1301)
+```
+
+```{r}
+str(h2o_iris)
+```
+
+
+
+
+
+
+```{r}
+h2o_dt_setosa
+
+h2o_dt_versicolor
+```
+
+
+# Validación del modelo
+
+```{r}
+pred_setosa <- h2o.predict(h2o_dt_setosa, test)
+pred_versicolor <- h2o.predict(h2o_dt_versicolor, test)
+```
+
+```{r}
+cm_setosa <- h2o.confusionMatrix(h2o_dt_setosa, test)
+cm_versicolor <- h2o.confusionMatrix(h2o_dt_versicolor, test)
+cm_setosa
+cm_versicolor
+```
+
+```{r}
+accuracy <- function(cm) {
+  cmm <- as.matrix(cm[1:2,1:2])
+  return (sum(diag(cmm)) / sum(cmm))
+}
+```
+
+
+```{r}
+accuracy(cm_setosa)
+accuracy(cm_versicolor)
+```
+
+```{r}
+h2o.performance(h2o_dt_versicolor, auc_type = "AUTO", newdata = test)
+```
+
+
+# Explotación del modelo
+
+```{r}
+which_specie <- function(new_data) {
+  h2o_new_data <- as.h2o(new_data)
+  pred_setosa <- h2o.predict(h2o_dt_setosa, h2o_new_data)
+  pred_versicolor <- h2o.predict(h2o_dt_versicolor, h2o_new_data)
+  
+  is_setosa <- as.vector(pred_setosa$predict) == 1
+  is_versicolor <- as.vector(pred_versicolor$predict) == 1
+  
+  specie <- ifelse(is_setosa, "setosa",
+                   ifelse(is_versicolor, "versicolor", "virginica"))
+  return(specie)
+}
+```
+
+
+```{r}
+new_data <- data.frame(Sepal.Length = c(5.1, 6.5),
+                       Sepal.Width = c(3.5, 3.0),
+                       Petal.Length = c(1.4, 5.2),
+                       Petal.Width = c(0.2, 2.0))
+which_specie(new_data)
+```
+

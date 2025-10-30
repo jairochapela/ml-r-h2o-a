@@ -1,0 +1,110 @@
+---
+title: "grid-search"
+output: html_document
+---
+
+```{r}
+# Carga de librería ye inicio de la conexión al clúster H2O
+library(readr)
+library(h2o)
+
+Sys.setenv(JAVA_HOME = "/opt/homebrew/opt/openjdk@17")
+
+h2o.init()
+```
+
+# Carga y preparación de los datos
+```{r}
+data(iris)
+h2o_iris <- as.h2o(iris)
+```
+```{r}
+X <- c("Sepal.Length", "Sepal.Width", "Petal.Length", "Petal.Width")
+y <- "Species"
+```
+
+```{r}
+splits <- h2o.splitFrame(h2o_iris, ratios = 0.8, seed = 1301)
+train <- splits[[1]]
+test <- splits[[2]]
+```
+
+# Grid search
+
+## Búsqueda en cuadrícula (estrategia cartesiana)
+
+```{r}
+hyperparameters <- list(
+  ntrees = c(10, 50, 100),
+  max_depth = c(2, 5, 10)
+)
+
+gs1 <- h2o.grid(
+  algorithm = "gbm",
+  grid_id = "gbm_grid_cartesian",
+  x = X,
+  y = y,
+  training_frame = train,
+  hyper_params = hyperparameters,
+  search_criteria = list(strategy = "Cartesian")
+)
+
+gs1
+```
+
+```{r}
+hall_of_fame <- h2o.getGrid(
+  grid_id = "gbm_grid_cartesian",
+  sort_by = "accuracy",
+  decreasing = TRUE
+)
+
+hall_of_fame
+```
+
+## Búsqueda aleatoria
+
+```{r}
+hyperparameters <- list(
+  ntrees = c(10, 50, 100),
+  max_depth = c(2, 5, 10),
+  min_rows = c(1, 2, 4, 8),
+  learn_rate = c(0.01, 0.1, 0.15),
+  #distribution = c("bernoulli", "multinomial", "gaussian", "gamma"),
+  sample_rate = c(0.6, 1.0)
+)
+
+gs2 <- h2o.grid(
+  algorithm = "gbm",
+  grid_id = "gbm_grid_random",
+  x = X,
+  y = y,
+  training_frame = train,
+  hyper_params = hyperparameters,
+  search_criteria = list(strategy = "RandomDiscrete", max_models = 100, seed = 1301)
+)
+
+gs2
+```
+
+```{r}
+hall_of_fame <- h2o.getGrid(
+  grid_id = "gbm_grid_random",
+  sort_by = "accuracy",
+  decreasing = TRUE
+)
+
+hall_of_fame
+```
+```{r}
+best_model <- h2o.getModel(hall_of_fame@model_ids[[1]])
+best_model
+```
+```{r}
+pred <- h2o.predict(best_model, test)
+
+h2o.confusionMatrix(best_model, test)
+```
+
+
+
