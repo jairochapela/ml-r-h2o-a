@@ -1,0 +1,313 @@
+---
+title: "titanic"
+output: html_document
+---
+
+```{r}
+library(h2o)
+h2o.init()
+```
+```{r}
+SEED <- 8123
+```
+
+
+# Carga de datos inicial
+
+```{r}
+# Cargar datos desde un archivo CSV en el cluster H2O
+data_h2o <- h2o.uploadFile("data/titanic.csv", na.strings = c("", "NA"))
+```
+```{r}
+str(data_h2o)
+```
+
+
+```{r}
+head(data_h2o)
+```
+```{r}
+# Convertir variables categóricas a factores
+data_h2o$survived <- as.factor(data_h2o$survived)
+data_h2o$pclass <- as.factor(data_h2o$pclass)
+```
+
+```{r}
+# Corregir algunos valores en embarked
+data_h2o$embarked <- as.factor(data_h2o$embarked)
+#data_h2o$embarked <- h2o.ifelse(data_h2o$embarked == "NA", NA, data_h2o$embarked)
+```
+
+```{r}
+# Me quedo con las columnas interesantes para mi estudio
+data_h2o <- data_h2o[, c("survived", "pclass", "sex", "age", "sibsp", "parch", "fare", "embarked")]
+```
+
+
+```{r}
+# Limpiar datos vacíos o nulos
+data_h2o <- h2o.na_omit(data_h2o)
+```
+
+```{r}
+# Resumen estadístico de los datos
+summary(data_h2o)
+```
+```{r}
+h2o.nrow(data_h2o)
+```
+
+
+
+```{r}
+# Histograma del precio del billete (fare)
+h2o.hist(data_h2o$fare, breaks=20)
+```
+```{r}
+# Calculamos el percentil 80 de fare
+fare_q99 <- h2o.quantile(data_h2o$fare, probs = 0.99)
+fare_q99
+```
+
+```{r}
+# Filtramos los datos para quedarnos con fare <= percentil 99
+data_h2o <- data_h2o[data_h2o$fare <= fare_q99,]
+```
+
+```{r}
+h2o.nrow(data_h2o)
+```
+
+
+```{r}
+summary(data_h2o)
+```
+
+
+
+# Determinación de variables
+
+```{r}
+# Variable objetivo
+y <- "survived"
+# Variables predictoras
+X <- setdiff(names(data_h2o), y)
+```
+
+# División de datos en entrenamiento y prueba
+
+```{r}
+# Reservamos el 80% de los datos para entrenamiento y el 20% para prueba
+splits <- h2o.splitFrame(data_h2o, ratios = 0.8, seed = SEED)
+train <- splits[[1]]
+test <- splits[[2]]
+```
+
+# Entrenamiento del algoritmo
+
+## Algoritmo de clasificación
+
+Algoritmo elegido: Random Forest
+
+```{r}
+rf_model <- h2o.randomForest(
+  x = X,
+  y = y,
+  training_frame = train,
+  ntrees = 100,
+  max_depth = 20,
+  seed = SEED
+)
+```
+
+
+```{r}
+# Resumen del modelo
+summary(rf_model)
+```
+
+```{r}
+# Importancia de las variables, descripción gráfica
+h2o.varimp_plot(rf_model)
+```
+## Evaluación del modelo
+
+```{r}
+# Evaluar el modelo en el conjunto de prueba
+rf_model_perf <- h2o.performance(rf_model, newdata = test)
+rf_model_perf
+```
+```{r}
+cm <- h2o.confusionMatrix(rf_model_perf)
+cm
+```
+
+```{r}
+# Proporción de casos acertados
+cmm <- as.matrix(cm[1:2, 1:2])
+sum(diag(cmm)) / sum(cmm)
+```
+
+# Ajuste fino del modelo
+
+Grid search para optimizar hiperparámetros
+
+```{r}
+hyper_params <- list(
+  ntrees = c(20, 50, 100),
+  max_depth = c(10, 20, 30),
+  min_rows = c(1, 2, 4)
+)
+
+grid <- h2o.grid(
+  algorithm = "randomForest",
+  grid_id = "rf_grid",
+  x = X,
+  y = y,
+  training_frame = train,
+  hyper_params = hyper_params,
+  binomial_double_trees = TRUE,
+  search_criteria = list(strategy = "RandomDiscrete", max_models = 20, seed = SEED),
+  seed = SEED
+)
+```
+
+
+
+```{r}
+# Obtener los mejores modelos del grid
+grid_perf <- h2o.getGrid(grid_id = "rf_grid", sort_by = "auc", decreasing = TRUE)
+print(grid_perf)
+```
+```{r}
+# Seleccionar el mejor modelo
+best_rf_model <- h2o.getModel(grid_perf@model_ids[[1]])
+```
+
+```{r}
+# Evaluar el mejor modelo en el conjunto de prueba
+best_rf_model_perf <- h2o.performance(best_rf_model, newdata = test)
+best_rf_model_perf
+```
+```{r}
+cm_best <- h2o.confusionMatrix(best_rf_model_perf)
+cm_best
+```
+```{r}
+# Proporción de casos acertados del mejor modelo
+cmm_best <- as.matrix(cm_best[1:2, 1:2])
+sum(diag(cmm_best)) / sum(cmm_best)
+```
+
+
+# Modelo apilado (Stacked ensemble)
+
+```{r}
+rf_model <- h2o.randomForest(
+  x = X,
+  y = y,
+  training_frame = train,
+  ntrees = 100,
+  max_depth = 20,
+  min_rows = 4,
+  nfolds = 5,
+  keep_cross_validation_predictions = TRUE,
+  seed = SEED
+)
+
+gbm_model <- h2o.gbm(
+  x = X,
+  y = y,
+  training_frame = train,
+  ntrees = 50,
+  max_depth = 8,
+  nfolds = 5,
+  keep_cross_validation_predictions = TRUE,
+  seed = SEED
+)
+
+dl_model <- h2o.deeplearning(
+  x = X,
+  y = y,
+  training_frame = train,
+  hidden = c(20, 20),
+  epochs = 10,
+  nfolds = 5,
+  keep_cross_validation_predictions = TRUE,
+  seed = SEED
+)
+
+ensemble <- h2o.stackedEnsemble(
+  x = X,
+  y = y,
+  training_frame = train,
+  base_models = list(rf_model, gbm_model, dl_model),
+  seed = SEED
+)
+```
+```{r}
+# Evaluar el modelo apilado en el conjunto de prueba
+ensemble_perf <- h2o.performance(ensemble, newdata = test)
+ensemble_perf
+```
+```{r}
+cm_ensemble <- h2o.confusionMatrix(ensemble_perf)
+cm_ensemble
+```
+```{r}
+# Proporción de casos acertados del modelo apilado
+cmm_ensemble <- as.matrix(cm_ensemble[1:2, 1:2])
+sum(diag(cmm_ensemble)) / sum(cmm_ensemble)
+```
+
+Evaluación del modelo compuesto vs. cada uno de los modelos que lo componen
+
+```{r}
+rf_model_perf <- h2o.performance(rf_model, newdata = test)
+gbm_model_perf <- h2o.performance(gbm_model, newdata = test)
+dl_model_perf <- h2o.performance(dl_model, newdata = test)
+
+gbm_auc <- h2o.auc(gbm_model_perf)
+rf_auc <- h2o.auc(rf_model_perf)
+dl_auc <- h2o.auc(dl_model_perf)
+ensemble_auc <- h2o.auc(ensemble_perf)
+
+print(paste("GBM AUC:", gbm_auc))
+print(paste("RF AUC:", rf_auc))
+print(paste("DL AUC:", dl_auc))
+print(paste("Ensemble AUC:", ensemble_auc))
+```
+# Aplicar el modelo entrenado
+
+```{r}
+# Crear un nuevo pasajero para predecir
+nuevo_pasajero <- data.frame(
+  pclass = factor(3, levels = c(1, 2, 3)),
+  embarked = factor("S", levels = c("C", "Q", "S")),
+  sex = factor("male", levels = c("female", "male")),
+  age = 50,
+  sibsp = 2,
+  parch = 0,
+  fare = 86.50
+)
+
+nuevo_pasajero_h2o <- as.h2o(nuevo_pasajero)
+```
+```{r}
+# Predecir la supervivencia del nuevo pasajero usando el modelo apilado
+prediccion <- h2o.predict(ensemble, nuevo_pasajero_h2o)
+prediccion
+```
+
+# Exportación del modelo
+
+```{r}
+# Guardar el modelo apilado en disco
+h2o.saveModel(ensemble, path = "models/titanic_ensemble_model", force = TRUE)
+```
+
+```{r}
+# Exportar MOJO
+h2o.download_mojo(ensemble, path = "models", get_genmodel_jar = TRUE)
+```
+
